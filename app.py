@@ -11,7 +11,37 @@ Deploy:        Push to GitHub and connect at https://share.streamlit.io
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 from io import BytesIO, StringIO
+
+# ─────────────────────────────────────────────────────────────
+# Custom "ETAP" template — light blue panel, white gridlines,
+# crisp axes, no markers by default. Matches ETAP's plot style.
+# ─────────────────────────────────────────────────────────────
+pio.templates["etap"] = go.layout.Template(
+    layout=dict(
+        paper_bgcolor="white",
+        plot_bgcolor="#E8EEF5",
+        font=dict(family="Arial, sans-serif", size=13, color="#222"),
+        xaxis=dict(
+            gridcolor="white", gridwidth=1.5,
+            zeroline=False,
+            showline=True, linecolor="#B0B8C4", linewidth=1,
+            ticks="outside", tickcolor="#B0B8C4", ticklen=4,
+            mirror=True,
+        ),
+        yaxis=dict(
+            gridcolor="white", gridwidth=1.5,
+            zeroline=False,
+            showline=True, linecolor="#B0B8C4", linewidth=1,
+            ticks="outside", tickcolor="#B0B8C4", ticklen=4,
+            mirror=True,
+        ),
+        colorway=["#1F77FF", "#E63946", "#2CA02C", "#9467BD",
+                  "#FF7F0E", "#17BECF", "#8C564B", "#E377C2"],
+    )
+)
+pio.templates.default = "etap"
 
 # ─────────────────────────────────────────────────────────────
 # Page config
@@ -75,8 +105,14 @@ def build_figure(curves, overlays, settings):
             y=c["data"]["Value"],
             mode="lines+markers" if settings["show_markers"] else "lines",
             name=c["name"],
-            line=dict(color=c["color"], width=c["width"], dash=c["dash"]),
-            marker=dict(size=6),
+            line=dict(
+                color=c["color"],
+                width=c["width"],
+                dash=c["dash"],
+                shape=settings["line_shape"],
+            ),
+            marker=dict(size=4, line=dict(width=0)),
+            connectgaps=True,
             hovertemplate="<b>%{fullData.name}</b><br>t = %{x:.3f} s<br>y = %{y:.3f}<extra></extra>",
         ))
 
@@ -108,8 +144,8 @@ def build_figure(curves, overlays, settings):
         hovermode="x unified",
         legend=dict(
             orientation="v", x=1.02, y=1,
-            bgcolor="rgba(255,255,255,0.6)",
-            bordercolor="lightgrey", borderwidth=1,
+            bgcolor="rgba(255,255,255,0)",
+            bordercolor="rgba(0,0,0,0)", borderwidth=0,
         ),
         margin=dict(l=70, r=240, t=80, b=70),
     )
@@ -119,8 +155,6 @@ def build_figure(curves, overlays, settings):
     if settings["y_range"]:
         fig.update_yaxes(range=settings["y_range"])
 
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="lightgrey")
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="lightgrey")
     return fig
 
 
@@ -134,10 +168,22 @@ with st.sidebar:
     y_label = st.text_input("Y-Axis Label", "f in %")
     theme = st.selectbox(
         "Theme",
-        ["plotly_white", "plotly", "plotly_dark", "ggplot2", "seaborn", "simple_white"],
+        ["etap", "plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white"],
         index=0,
+        help="`etap` matches the ETAP-style light blue panel with white gridlines.",
     )
-    show_markers = st.checkbox("Show data markers", value=True)
+    show_markers = st.checkbox(
+        "Show data markers",
+        value=False,
+        help="Off = clean lines (recommended for dense ETAP data). "
+             "On = small dots at each data point (best for sparse data, ≲ 30 points).",
+    )
+    line_shape = st.selectbox(
+        "Line shape",
+        ["linear", "spline", "hv", "vh", "hvh", "vhv"],
+        index=0,
+        help="`linear` = straight segments (default). `spline` = smoothed.",
+    )
 
     st.divider()
     st.subheader("Axis Ranges (optional)")
@@ -163,7 +209,7 @@ with st.sidebar:
 
 settings = {
     "title": title, "x_label": x_label, "y_label": y_label,
-    "theme": theme, "show_markers": show_markers,
+    "theme": theme, "show_markers": show_markers, "line_shape": line_shape,
     "x_range": x_range, "y_range": y_range,
 }
 
@@ -279,13 +325,13 @@ with tab_curves:
     new_name  = p1.text_input("Name", f"Curve {len(st.session_state.curves) + 1}")
     new_color = p2.color_picker("Color", "#EF553B")
     new_dash  = p3.selectbox("Style", DASH_OPTIONS, key="new_dash")
-    new_width = p4.number_input("Width", 1, 6, 2, key="new_width")
+    new_width = p4.number_input("Width", 1.0, 6.0, 1.5, step=0.5, key="new_width")
 
     if st.button("➕ Add curve", type="primary", use_container_width=True):
         if new_data is not None and len(new_data) > 0:
             st.session_state.curves.append({
                 "name": new_name, "color": new_color,
-                "dash": new_dash, "width": int(new_width),
+                "dash": new_dash, "width": float(new_width),
                 "data": new_data.reset_index(drop=True),
             })
             st.success(f"Added: {new_name}")
@@ -305,7 +351,7 @@ with tab_curves:
             c["color"] = r2.color_picker("Color", c["color"], key=f"c_{i}")
             c["dash"]  = r3.selectbox("Style", DASH_OPTIONS,
                                       index=DASH_OPTIONS.index(c["dash"]), key=f"d_{i}")
-            c["width"] = int(r4.number_input("Width", 1, 6, c["width"], key=f"w_{i}"))
+            c["width"] = float(r4.number_input("Width", 1.0, 6.0, float(c["width"]), step=0.5, key=f"w_{i}"))
             if r5.button("🗑️", key=f"del_{i}", help="Delete this curve"):
                 st.session_state.curves.pop(i)
                 st.rerun()
